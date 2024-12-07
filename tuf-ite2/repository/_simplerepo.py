@@ -64,7 +64,7 @@ class SimpleRepository(Repository):
 
     # Lab4: ITE-2 expiry period for root and targets = 365 days, others = 1 day
     # >>>
-    raise NotImplementedError("Implement this")
+    # raise NotImplementedError("Implement this")
     # <<<
 
     def _build_key_dir(self, base_url: str) -> str:
