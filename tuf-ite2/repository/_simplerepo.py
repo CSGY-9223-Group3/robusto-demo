@@ -95,13 +95,25 @@ class SimpleRepository(Repository):
         # Lab4: Create signers as per ITE-2, root and targets share the same
         # key, snapshot and timestamp share the same key
         # >>>
-        raise NotImplementedError("Implement this")
+        # Create signers for root, snapshot, timestamp, and targets
+        signers = {
+            "root": CryptoSigner(),
+            "timestamp": CryptoSigner(),
+            "snapshot": CryptoSigner(),
+            "targets": CryptoSigner(),
+        }
+
+        # Share keys between root/targets and timestamp/snapshot
+        self.signer_cache["root"].append(signers["root"])
+        self.signer_cache["targets"].append(signers["targets"])
+        self.signer_cache["timestamp"].append(signers["timestamp"])
+        self.signer_cache["snapshot"].append(signers["snapshot"])
         # <<<
 
         # setup a basic repository, generate signing key per top-level role
         with self.edit_root() as root:
             for role in ["root", "timestamp", "snapshot", "targets"]:
-                self.signer_cache[role].append(signers[role])
+                # self.signer_cache[role].append(signers[role])
                 root.add_key(signers[role].public_key, role)
 
         for role in ["timestamp", "snapshot", "targets"]:
