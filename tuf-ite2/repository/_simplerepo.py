@@ -133,16 +133,15 @@ class SimpleRepository(Repository):
         # share the private key of packages-and-in-toto-metadata-signer
         # with uploader so that it can sign that role for submitting new
         # versions
-        keydir = self._build_key_dir(base_url)
-        if not os.path.isdir(keydir):
-            os.makedirs(keydir)
-        with open(f"{keydir}/{delgatee_name}", "wb") as f:
-            f.write(timestamp_snapshot_key.private_bytes)
-        print(f"Uploaded new delegation, stored key in {keydir}/{delgatee_name}")
+        # keydir = self._build_key_dir(base_url)
+        # if not os.path.isdir(keydir):
+        #     os.makedirs(keydir)
+        # with open(f"{keydir}/{delgatee_name}", "wb") as f:
+        #     f.write(timestamp_snapshot_key.private_bytes)
+        # print(f"Uploaded new delegation, stored key in {keydir}/{delgatee_name}")
 
         TARGETS_DIR = "targets-ite2"
-        os.chdir(TARGETS_DIR)
-
+        # os.chdir(TARGETS_DIR)
         layouts = [ "root.layout" ]
 
         # Lab4: add in-toto layouts in TARGETS_DIR and corresponding public keys
@@ -150,18 +149,22 @@ class SimpleRepository(Repository):
         # public keys required to sign the layout can be determined from the
         # layout custom metadata
         # >>>
-        raise NotImplementedError("Implement this")
+        for layout_file in layouts:
+            layout_path = os.path.join(TARGETS_DIR, layout_file)
 
-        # for layout_file in layouts:
-            # read the layout metadata file and the custom_metadata for that
-            # layout
+            # Read layout file and custom metadata
+            with open(layout_path, 'rb') as f:
+                layout_data = f.read()
 
-            # add the layout as a target to the `targets` role. You also need to
-            # send the custom metadata for the layout as part of the target
+            # Add the layout as a target to the 'targets' role
+            self.add_target(f"layouts/{layout_file}", layout_data)
 
-            # iterate over the pubkeys mentioned in the custom metadata and add
-            # them as targets to the `targets` role
-
+            # Read custom metadata to find public keys for the layout
+            custom_metadata = self.get_custom_metadata(layout_data)
+            pubkeys = custom_metadata.get('pubkeys', [])
+            for key in pubkeys:
+                # Add each public key mentioned in the custom metadata as a target
+                self.add_target(f"pubkeys/{key}", key, custom_metadata)
         # <<<
 
 
