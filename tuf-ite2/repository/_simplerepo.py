@@ -88,6 +88,10 @@ class SimpleRepository(Repository):
             lambda: MetaFile(1)
         )
 
+        # Expiry periods
+        self.expiry_period_root_timestamp = timedelta(days=365)  # Root and targets expiry: 365 days
+        self.expiry_period = timedelta(days=1)  # Other roles expiry: 1 day
+
         # Lab4: Create signers as per ITE-2, root and targets share the same
         # key, snapshot and timestamp share the same key
         # >>>
