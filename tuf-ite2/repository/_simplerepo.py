@@ -124,7 +124,10 @@ class SimpleRepository(Repository):
         # packages-and-in-toto-metadata-signer. This role uses the same key as
         # timestamp and snapshot
         # >>>
-        raise NotImplementedError("Implement this")
+        # Create delegation for 'packages-and-in-toto-metadata-signer' role
+        # This role uses the same key as timestamp and snapshot
+        delegator = self.root()  # Root role for delegation
+        delegator.add_delegation("packages-and-in-toto-metadata-signer", signers["timestamp"])
         # <<<
         
         # share the private key of packages-and-in-toto-metadata-signer
