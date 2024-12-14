@@ -12,8 +12,7 @@ from typing import Optional, Union
 from typing import Dict, List
 import os
 
-from securesystemslib.signer import CryptoSigner, Key, Signer, generate_ed25519_key
-
+from securesystemslib.signer import CryptoSigner, Key, Signer
 
 
 from tuf.api.exceptions import RepositoryError
@@ -95,32 +94,31 @@ class SimpleRepository(Repository):
         self.expiry_period = timedelta(days=1)  # Other roles expiry: 1 day
 
         # Generate two separate keys for ITE-2
-        root_targets_key = generate_ed25519_key()
-        snapshot_timestamp_key = generate_ed25519_key()
+        # per https://github.com/secure-systems-lab/securesystemslib/blob/main/docs/CRYPTO_SIGNER.md
+        root_targets_signer = CryptoSigner.generate_ed25519()
+        snapshot_timestamp_signer = CryptoSigner.generate_ed25519()
+
         
         # Lab4: Create signers as per ITE-2, root and targets share the same
         # key, snapshot and timestamp share the same key
         # >>>
         # Create signers for root, snapshot, timestamp, and targets
+        # Share keys between root/targets and timestamp/snapshot
         self.signer_cache = {
-            "root": [CryptoSigner(root_targets_key)],
-            "targets": [CryptoSigner(root_targets_key)],
-            "snapshot": [CryptoSigner(snapshot_timestamp_key)],
-            "timestamp": [CryptoSigner(snapshot_timestamp_key)]
+            "root": [root_targets_signer],
+            "targets": [root_targets_signer],
+            "snapshot": [snapshot_timestamp_signer],
+            "timestamp": [snapshot_timestamp_signer]
         }
 
         # Share keys between root/targets and timestamp/snapshot
-        self.signer_cache["root"].append(signers["root"])
-        self.signer_cache["targets"].append(signers["targets"])
-        self.signer_cache["timestamp"].append(signers["timestamp"])
-        self.signer_cache["snapshot"].append(signers["snapshot"])
         # <<<
 
         # setup a basic repository, generate signing key per top-level role
         with self.edit_root() as root:
-            for role in ["root", "timestamp", "snapshot", "targets"]:
-                # self.signer_cache[role].append(signers[role])
-                root.add_key(signers[role].public_key, role)
+                for role in ["root", "timestamp", "snapshot", "targets"]:
+                    signer = self.signer_cache[role][0]  # Access the first signer for the role
+                    root.add_key(signer.public_key, role)  # Add the public key to the role
 
         for role in ["timestamp", "snapshot", "targets"]:
             with self.edit(role):
@@ -130,21 +128,40 @@ class SimpleRepository(Repository):
         # packages-and-in-toto-metadata-signer. This role uses the same key as
         # timestamp and snapshot
         # >>>
-        # Create delegation for 'packages-and-in-toto-metadata-signer' role
-        # This role uses the same key as timestamp and snapshot
-        delegator = self.root()  # Root role for delegation
-        delegator.add_delegation("packages-and-in-toto-metadata-signer", signers["timestamp"])
-        # <<<
-        
-        # share the private key of packages-and-in-toto-metadata-signer
-        # with uploader so that it can sign that role for submitting new
-        # versions
-        # keydir = self._build_key_dir(base_url)
-        # if not os.path.isdir(keydir):
-        #     os.makedirs(keydir)
-        # with open(f"{keydir}/{delgatee_name}", "wb") as f:
-        #     f.write(timestamp_snapshot_key.private_bytes)
-        # print(f"Uploaded new delegation, stored key in {keydir}/{delgatee_name}")
+        with self.edit_targets() as targets:
+            if targets.delegations is None:
+                targets.delegations = Delegations({}, {})
+
+            # Create new delegated role using timestamp's key
+            timestamp_signer = self.signer_cache["timestamp"][0]
+            keyid = timestamp_signer.public_key.keyid
+            
+            # Initialize delegated role
+            delegated_role = DelegatedRole(
+                name="packages-and-in-toto-metadata-signer",
+                keyids=[keyid],
+                threshold=1,
+                terminating=False,
+                paths=["packages/*", "in-toto-metadata/*"]
+            )
+            
+            # Add role to targets delegations
+            targets.delegations.roles[delegated_role.name] = delegated_role
+            
+            # Add key to delegations
+            if targets.delegations.keys is None:
+                targets.delegations.keys = {}
+            targets.delegations.keys[keyid] = timestamp_signer.public_key
+
+        # Share private key with uploader
+        delegatee_name = "packages-and-in-toto-metadata-signer.pem"
+
+        keydir = self._build_key_dir(base_url)
+        if not os.path.isdir(keydir):
+            os.makedirs(keydir)
+        with open(f"{keydir}/{delegatee_name}", "wb") as f:
+            f.write(snapshot_timestamp_signer.private_bytes)
+        print(f"Uploaded new delegation, stored key in {keydir}/{delegatee_name}")
 
         TARGETS_DIR = "targets-ite2"
         # os.chdir(TARGETS_DIR)
