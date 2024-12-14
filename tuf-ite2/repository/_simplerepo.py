@@ -9,10 +9,12 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
-from typing import Dict
+from typing import Dict, List
 import os
 
-from securesystemslib.signer import CryptoSigner, Key, Signer
+from securesystemslib.signer import CryptoSigner, Key, Signer, generate_ed25519_key
+
+
 
 from tuf.api.exceptions import RepositoryError
 from tuf.api.metadata import (
@@ -92,15 +94,19 @@ class SimpleRepository(Repository):
         self.expiry_period_root_timestamp = timedelta(days=365)  # Root and targets expiry: 365 days
         self.expiry_period = timedelta(days=1)  # Other roles expiry: 1 day
 
+        # Generate two separate keys for ITE-2
+        root_targets_key = generate_ed25519_key()
+        snapshot_timestamp_key = generate_ed25519_key()
+        
         # Lab4: Create signers as per ITE-2, root and targets share the same
         # key, snapshot and timestamp share the same key
         # >>>
         # Create signers for root, snapshot, timestamp, and targets
-        signers = {
-            "root": CryptoSigner(),
-            "timestamp": CryptoSigner(),
-            "snapshot": CryptoSigner(),
-            "targets": CryptoSigner(),
+        self.signer_cache = {
+            "root": [CryptoSigner(root_targets_key)],
+            "targets": [CryptoSigner(root_targets_key)],
+            "snapshot": [CryptoSigner(snapshot_timestamp_key)],
+            "timestamp": [CryptoSigner(snapshot_timestamp_key)]
         }
 
         # Share keys between root/targets and timestamp/snapshot
@@ -169,7 +175,7 @@ class SimpleRepository(Repository):
 
 
     @property
-    def targets_infos(self) -> dict[str, MetaFile]:
+    def targets_infos(self) -> Dict[str, MetaFile]: ##changed from dict to Dict
         return self._targets_infos
 
     @property
@@ -257,7 +263,7 @@ class SimpleRepository(Repository):
         self.do_snapshot()
         self.do_timestamp()
 
-    def submit_delegation(self, rolename: str, data: bytes, paths: Optional[list[str]] = None) -> bool:
+    def submit_delegation(self, rolename: str, data: bytes, paths: Optional[List[str]] = None) -> bool: ##changed from list to List
         """Add a delegation to a (offline signed) delegated targets metadata"""
         try:
             logger.debug("Processing new delegation to role %s", rolename)
