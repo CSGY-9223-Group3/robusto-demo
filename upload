@@ -6,121 +6,62 @@ import argparse
 import hashlib
 import json
 
-# Directories for targets, packages, in-toto metadata, and public keys
 TARGETS_DIR = "targets-ite2/"
 PACKAGES_DIR = "packages/"
 IN_TOTO_METADATA_DIR = "in-toto-metadata/"
 PUBKEYS_DIR = "in-toto-pubkeys/"
-
 # Define role
 ROLE = "packages-and-in-toto-metadata-signer"
 
-# def calculate_sha256(file_path: str) -> str:
-#     """Helper function to calculate the sha256 hash of a file."""
-#     sha256_hash = hashlib.sha256()
-#     with open(file_path, "rb") as f:
-#         for byte_block in iter(lambda: f.read(4096), b""):
-#             sha256_hash.update(byte_block)
-#     return sha256_hash.hexdigest()
-
-def upload_package(package_name: str):
-    """
-    Function to upload the package and its associated metadata to the repository.
-    It will also upload any in-toto metadata links associated with the package.
-    """
-    # Check if package exists in the package directory
-    #package_path = os.path.join(TARGETS_DIR, PACKAGES_DIR, package_name)
-    # if not os.path.exists(package_path):
-    #     raise FileNotFoundError(f"Package '{package_name}' not found in {PACKAGES_DIR}")
-
-    # Calculate sha256 of the package for target naming
-    #package_sha256 = calculate_sha256(package_path)
-
-    # Change to the targets directory where the uploader script expects the files
-    os.chdir(TARGETS_DIR)
-
-    # Upload the package file with its custom metadata
-    # First, generate the custom metadata for the package (e.g., target's sha256 hash)
-    # package_metadata = {
-    #     "file_name": package_name,
-    #     "sha256": package_sha256
-    # }
-
-    # Write custom metadata to a file
-    # custom_metadata_filename = f"{package_sha256}.package.custom"
-    # with open(custom_metadata_filename, "w") as metadata_file:
-    #     json.dump(package_metadata, metadata_file)
-
-    custom_metadata_filename = hashlib.sha256(package_name.encode()).hexdigest() + '.package.custom'
-    # with open(custom_metadata_filename, "r") as f:
-    #     custom_metadata = f.read()
-
-    # Call the TUF uploader to upload the package and its metadata
-    tofu_command = [
-        "../tuf-ite2/uploader/uploader",
-        "tofu"
-    ]
-    subprocess.run(tofu_command, check=True)
-    add_delegation_command = [
-        "../tuf-ite2/uploader/uploader",
-        "add-delegation",
-        ROLE
-    ]
-    subprocess.run(add_delegation_command, check=True)
-    upload_package_command = [
-        "../tuf-ite2/uploader/uploader",
-        "add-target",
-        ROLE,
-        os.path.join(PACKAGES_DIR, package_name),
-        "--custom",
-        custom_metadata_filename
-    ]
-    subprocess.run(upload_package_command, check=True)
-    print("uploaded package")
-
-    # for link_file in os.listdir(os.path.join(IN_TOTO_METADATA_DIR, hashlib.sha256(package_name.encode()).hexdigest())):
-    #     link_file_path = os.path.join(IN_TOTO_METADATA_DIR, hashlib.sha256(package_name.encode()).hexdigest(), link_file)
-    #     if os.path.isfile(link_file_path):
-    #         upload_link_command = [
-    #             "../tuf-ite2/uploader/uploader",
-    #             "add-target",
-    #             ROLE,
-    #             link_file_path
-    #         ]
-    #         subprocess.run(upload_link_command, check=True)
-    #         print("uploaded", link_file_path)
-
-
-    # Now upload the in-toto metadata for the package
-    # The in-toto links are expected to be in the 'in-toto-metadata' directory
-    # in_toto_dir = os.path.join(IN_TOTO_METADATA_DIR, package_sha256)
-    # if os.path.exists(in_toto_dir):
-    #     for link_file in os.listdir(in_toto_dir):
-    #         link_file_path = os.path.join(in_toto_dir, link_file)
-    #         if os.path.isfile(link_file_path):
-    #             # Upload the in-toto link files
-    #             upload_command = [
-    #                 "../tuf-ite2/uploader/uploader",
-    #                 "upload",
-    #                 link_file,
-    #                 link_file_path
-    #             ]
-    #             subprocess.run(upload_command, check=True)
-
-    print(f"Successfully uploaded package '{package_name}' and its in-toto metadata.")
 
 def main():
-    # Set up argument parsing
-    parser = argparse.ArgumentParser(description="Upload a package and its metadata to the TUF repository.")
-    parser.add_argument("package_name", help="The name of the package to upload (e.g., demo-project.tar.gz)")
-    
+    # Take package name as argument
+    parser = argparse.ArgumentParser(description="Upload package and in-toto metadata")
+    parser.add_argument("package_name", help="Name of the package to upload")
     args = parser.parse_args()
 
-    # Upload the package and its metadata
-    try:
-        upload_package(args.package_name)
-    except Exception as e:
-        print(f"Error uploading package: {e}")
+    package_name = args.package_name
+
+    # Before uploading, you must change to the directory where the targets are stored
+    os.chdir(TARGETS_DIR)
+
+    # Define role and filenames that have to be passed to `../tuf-ite2/uploader/uploader` binary
+    package_path = os.path.join(PACKAGES_DIR, package_name)
+    package_name_sha256 = hashlib.sha256(package_name.encode()).hexdigest()
+    custom_metadata_filename = package_name_sha256 + '.package.custom'
+
+
+    # uploader init (tofu)
+    subprocess.run(["../tuf-ite2/uploader/uploader", "tofu"], check=True)
+
+    # upload package with its custom metadata
+    subprocess.run(
+        [
+            "../tuf-ite2/uploader/uploader",
+            "add-target",
+            ROLE,
+            package_path,
+            "--custom",
+            custom_metadata_filename,
+        ],
+        check=True,
+    )
+
+    # upload all the links corresponding for the package you uploaded
+    with open(custom_metadata_filename, "r") as f:
+        custom_metadata = json.load(f)
+        for link_path in custom_metadata["custom"]["in-toto"]:
+            if link_path.endswith(".link"):
+                subprocess.run(
+                    [
+                        "../tuf-ite2/uploader/uploader",
+                        "add-target",
+                        ROLE,
+                        link_path,
+                    ],
+                    check=True,
+                )
+
 
 if __name__ == "__main__":
     main()

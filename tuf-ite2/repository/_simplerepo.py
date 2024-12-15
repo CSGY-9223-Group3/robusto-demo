@@ -9,11 +9,10 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
-from typing import Dict, List
+from typing import Dict
 import os
 
 from securesystemslib.signer import CryptoSigner, Key, Signer
-
 
 from tuf.api.exceptions import RepositoryError
 from tuf.api.metadata import (
@@ -65,7 +64,8 @@ class SimpleRepository(Repository):
 
     # Lab4: ITE-2 expiry period for root and targets = 365 days, others = 1 day
     # >>>
-    # raise NotImplementedError("Implement this")
+    expiry_period_root_timestamp = timedelta(days=365)
+    expiry_period = timedelta(days=1)
     # <<<
 
     def _build_key_dir(self, base_url: str) -> str:
@@ -89,36 +89,24 @@ class SimpleRepository(Repository):
             lambda: MetaFile(1)
         )
 
-        # Expiry periods
-        self.expiry_period_root_timestamp = timedelta(days=365)  # Root and targets expiry: 365 days
-        self.expiry_period = timedelta(days=1)  # Other roles expiry: 1 day
-
-        # Generate two separate keys for ITE-2
-        # per https://github.com/secure-systems-lab/securesystemslib/blob/main/docs/CRYPTO_SIGNER.md
-        root_targets_signer = CryptoSigner.generate_ed25519()
-        snapshot_timestamp_signer = CryptoSigner.generate_ed25519()
-
-        
         # Lab4: Create signers as per ITE-2, root and targets share the same
         # key, snapshot and timestamp share the same key
         # >>>
-        # Create signers for root, snapshot, timestamp, and targets
-        # Share keys between root/targets and timestamp/snapshot
-        self.signer_cache = {
-            "root": [root_targets_signer],
-            "targets": [root_targets_signer],
-            "snapshot": [snapshot_timestamp_signer],
-            "timestamp": [snapshot_timestamp_signer]
+        root_targets_key = CryptoSigner.generate_ecdsa()
+        timestamp_snapshot_key = CryptoSigner.generate_ecdsa()
+        signers = {
+            "root": root_targets_key,
+            "targets": root_targets_key,
+            "snapshot": timestamp_snapshot_key,
+            "timestamp": timestamp_snapshot_key,
         }
-
-        # Share keys between root/targets and timestamp/snapshot
         # <<<
 
         # setup a basic repository, generate signing key per top-level role
         with self.edit_root() as root:
             for role in ["root", "timestamp", "snapshot", "targets"]:
-                signer = self.signer_cache[role][0]  # Access the first signer for the role
-                root.add_key(signer.public_key, role)  # Add the public key to the role
+                self.signer_cache[role].append(signers[role])
+                root.add_key(signers[role].public_key, role)
 
         for role in ["timestamp", "snapshot", "targets"]:
             with self.edit(role):
@@ -128,43 +116,30 @@ class SimpleRepository(Repository):
         # packages-and-in-toto-metadata-signer. This role uses the same key as
         # timestamp and snapshot
         # >>>
+        delegatee_name = "packages-and-in-toto-metadata-signer"
+        role = DelegatedRole(delegatee_name, [timestamp_snapshot_key.public_key.keyid], 1, True, ["in-toto-metadata/*/*.link", "packages/*"])
         with self.edit_targets() as targets:
             if targets.delegations is None:
                 targets.delegations = Delegations({}, {})
-
-            # Create new delegated role using timestamp's key
-            timestamp_signer = self.signer_cache["timestamp"][0]
-            keyid = timestamp_signer.public_key.keyid
-            
-            # Initialize delegated role
-            delegated_role = DelegatedRole(
-                name="packages-and-in-toto-metadata-signer",
-                keyids=[keyid],
-                threshold=1,
-                terminating=False,
-                paths=["packages/*", "in-toto-metadata/*"]
-            )
-            
-            # Add role to targets delegations
-            targets.delegations.roles[delegated_role.name] = delegated_role
-            
-            # Add key to delegations
-            if targets.delegations.keys is None:
-                targets.delegations.keys = {}
-            targets.delegations.keys[keyid] = timestamp_signer.public_key
-
-        # Share private key with uploader
-        delegatee_name = "packages-and-in-toto-metadata-signer.pem"
-
+            if targets.delegations.roles is None:
+                targets.delegations.roles = {}
+            targets.delegations.roles[delegatee_name] = role
+            targets.add_key(timestamp_snapshot_key.public_key, delegatee_name)
+        # <<<
+        
+        # share the private key of packages-and-in-toto-metadata-signer
+        # with uploader so that it can sign that role for submitting new
+        # versions
         keydir = self._build_key_dir(base_url)
         if not os.path.isdir(keydir):
             os.makedirs(keydir)
         with open(f"{keydir}/{delegatee_name}", "wb") as f:
-            f.write(snapshot_timestamp_signer.private_bytes)
+            f.write(timestamp_snapshot_key.private_bytes)
         print(f"Uploaded new delegation, stored key in {keydir}/{delegatee_name}")
 
         TARGETS_DIR = "targets-ite2"
         os.chdir(TARGETS_DIR)
+
         layouts = [ "root.layout" ]
 
         # Lab4: add in-toto layouts in TARGETS_DIR and corresponding public keys
@@ -172,32 +147,31 @@ class SimpleRepository(Repository):
         # public keys required to sign the layout can be determined from the
         # layout custom metadata
         # >>>
-        IN_TOTO_METADATA_DIR = "in-toto-metadata"
         for layout_file in layouts:
-            layout_path = os.path.join(IN_TOTO_METADATA_DIR, layout_file)
+            layout_path = os.path.join('in-toto-metadata/', layout_file)
             custom_metadata_file_name = sha256(layout_file.encode()).hexdigest() + '.layout.custom'
-            custom_metadata_path = os.path.join(custom_metadata_file_name)
 
-            # Read layout file and custom metadata
-            with open(layout_path, 'r') as f:
-                layout_data = f.read()
-            with open(custom_metadata_path, 'r') as f:
-                custom_metadata = json.loads(f.read())
+            # read the layout metadata file and the custom_metadata for that layout
+            with open(layout_path, "r") as f:
+                layout_content = f.read()
+            with open(custom_metadata_file_name, "r") as f:
+                custom_metadata = json.load(f)
 
-            # Add the layout as a target to the 'targets' role
-            self.add_target(layout_file, layout_data, custom_metadata)
+            # add the layout as a target to the `targets` role. You also need to
+            # send the custom metadata for the layout as part of the target
+            self.add_target(layout_path, layout_content, custom_metadata)
 
-            # Read custom metadata to find public keys for the layout
-            pubkeys = custom_metadata['custom']['in-toto']
-            for key in pubkeys:
-                # Add each public key mentioned in the custom metadata as a target
-                with open(key, 'r') as f:
-                    self.add_target(key, f.read())
+            # iterate over the pubkeys mentioned in the custom metadata and add
+            # them as targets to the `targets` role
+            for pubkey_path in custom_metadata['custom']['in-toto']:
+                with open(pubkey_path, "r") as key_file:
+                    pubkey_content = key_file.read()
+                self.add_target(pubkey_path, pubkey_content)
         # <<<
 
 
     @property
-    def targets_infos(self) -> Dict[str, MetaFile]: ##changed from dict to Dict
+    def targets_infos(self) -> dict[str, MetaFile]:
         return self._targets_infos
 
     @property
@@ -285,7 +259,7 @@ class SimpleRepository(Repository):
         self.do_snapshot()
         self.do_timestamp()
 
-    def submit_delegation(self, rolename: str, data: bytes, paths: Optional[List[str]] = None) -> bool: ##changed from list to List
+    def submit_delegation(self, rolename: str, data: bytes, paths: Optional[list[str]] = None) -> bool:
         """Add a delegation to a (offline signed) delegated targets metadata"""
         try:
             logger.debug("Processing new delegation to role %s", rolename)
