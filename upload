@@ -29,7 +29,7 @@ def upload_package(package_name: str):
     It will also upload any in-toto metadata links associated with the package.
     """
     # Check if package exists in the package directory
-    package_path = os.path.join(PACKAGES_DIR, package_name)
+    package_path = os.path.join(TARGETS_DIR, PACKAGES_DIR, package_name)
     if not os.path.exists(package_path):
         raise FileNotFoundError(f"Package '{package_name}' not found in {PACKAGES_DIR}")
 
@@ -52,9 +52,14 @@ def upload_package(package_name: str):
         json.dump(package_metadata, metadata_file)
 
     # Call the TUF uploader to upload the package and its metadata
+    tofu_command = [
+        "../tuf-ite2/uploader/uploader",
+        "tofu",
+    ]
+    subprocess.run(tofu_command, check=True)
     upload_command = [
         "../tuf-ite2/uploader/uploader",
-        "upload",
+        "add-target",
         package_name,
         custom_metadata_filename
     ]

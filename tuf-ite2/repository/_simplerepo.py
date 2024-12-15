@@ -172,19 +172,23 @@ class SimpleRepository(Repository):
         # public keys required to sign the layout can be determined from the
         # layout custom metadata
         # >>>
+        IN_TOTO_METADATA_DIR = "in-toto-metadata"
         for layout_file in layouts:
-            layout_path = os.path.join(TARGETS_DIR, layout_file)
+            layout_path = os.path.join(TARGETS_DIR, IN_TOTO_METADATA_DIR, layout_file)
+            custom_metadata_file_name = sha256(layout_file.encode()).hexdigest() + '.layout.custom'
+            custom_metadata_path = os.path.join(TARGETS_DIR, custom_metadata_file_name)
 
             # Read layout file and custom metadata
-            with open(layout_path, 'rb') as f:
+            with open(layout_path, 'r') as f:
                 layout_data = f.read()
+            with open(custom_metadata_path, 'r') as f:
+                custom_metadata = json.loads(f.read())
 
             # Add the layout as a target to the 'targets' role
             self.add_target(f"layouts/{layout_file}", layout_data)
 
             # Read custom metadata to find public keys for the layout
-            custom_metadata = self.get_custom_metadata(layout_data)
-            pubkeys = custom_metadata.get('pubkeys', [])
+            pubkeys = custom_metadata['custom']['in-toto']
             for key in pubkeys:
                 # Add each public key mentioned in the custom metadata as a target
                 self.add_target(f"pubkeys/{key}", key, custom_metadata)
