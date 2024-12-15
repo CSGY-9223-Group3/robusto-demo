@@ -101,16 +101,14 @@ def download(base_url: str, target: str) -> bool:
         
         # Lab4: recursively download files mentioned in the custom field
         # >>>
-        custom_metadata = info.get("custom_metadata", None)
+        custom_metadata = dict(info.unrecognized_fields)
 
-        if custom_metadata:
-            links = custom_metadata.get("links", [])
-            for link in links:
-                link_target = link.get("target")
-                if link_target:
-                    print(f"Found linked target: {link_target}")
-                    # Recursively download the linked target
-                    download(base_url, link_target)        # <<<
+        if len(custom_metadata) == 0 or 'custom' not in custom_metadata or 'in-toto' not in custom_metadata['custom']:
+            return True
+        for custom_metadata_files in custom_metadata['custom']['in-toto']:
+            print(custom_metadata_files)
+            download(base_url, custom_metadata_files)
+        # <<<
 
         print(f"Target downloaded and available in {path}")
 
